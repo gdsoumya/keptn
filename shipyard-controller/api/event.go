@@ -32,6 +32,8 @@ type nextTaskSequence struct {
 
 const maxRepoReadRetries = 30
 
+var errNoMatchingEventAvailable = errors.New("no matching event available")
+
 // GetTriggeredEvents godoc
 // @Summary Get triggered events
 // @Description get triggered events by their type
@@ -127,6 +129,9 @@ func HandleEvent(c *gin.Context) {
 
 	err := sc.handleIncomingEvent(*event)
 	if err != nil {
+		if err == errNoMatchingEventAvailable {
+			sendBadRequestResponse(err, c)
+		}
 		sendInternalServerErrorResponse(err, c)
 		return
 	}
@@ -135,6 +140,14 @@ func HandleEvent(c *gin.Context) {
 }
 
 func sendInternalServerErrorResponse(err error, c *gin.Context) {
+	msg := err.Error()
+	c.JSON(http.StatusInternalServerError, models.Error{
+		Code:    500,
+		Message: &msg,
+	})
+}
+
+func sendBadRequestResponse(err error, c *gin.Context) {
 	msg := err.Error()
 	c.JSON(http.StatusInternalServerError, models.Error{
 		Code:    500,
@@ -266,7 +279,7 @@ func (sc *shipyardController) handleFinishedEvent(event models.Event) error {
 	} else if startedEvents == nil || len(startedEvents) == 0 {
 		msg := "no matching '.started' event for event " + event.ID + " with triggeredid " + event.Triggeredid
 		sc.logger.Error(msg)
-		return errors.New(msg)
+		return errNoMatchingEventAvailable
 	}
 
 	// persist the .finished event
@@ -300,7 +313,7 @@ func (sc *shipyardController) handleFinishedEvent(event models.Event) error {
 		if triggeredEvents == nil || len(triggeredEvents) == 0 {
 			msg := "no matching '.triggered' event for event " + event.ID + " with triggeredid " + event.Triggeredid
 			sc.logger.Error(msg)
-			return errors.New(msg)
+			return errNoMatchingEventAvailable
 		}
 		// if the previously deleted '.started' event was the last, the '.triggered' event can be removed
 		sc.logger.Info("triggered event will be deleted")
@@ -475,7 +488,7 @@ func (sc *shipyardController) handleStartedEvent(event models.Event) error {
 	} else if events == nil || len(events) == 0 {
 		msg := "no matching '.triggered' event for event " + event.ID + " with triggeredid " + event.Triggeredid
 		sc.logger.Error(msg)
-		return errors.New(msg)
+		return errNoMatchingEventAvailable
 	}
 
 	return sc.eventRepo.InsertEvent(eventScope.Project, event, db.StartedEvent)
